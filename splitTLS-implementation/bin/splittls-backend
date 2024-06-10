@@ -1,0 +1,16 @@
+#!/usr/bin/env node
+var stls = require('../');
+var fs = require('fs');
+
+var config = process.argv[2];
+if (config) {
+  config = JSON.parse(fs.readFileSync(config).toString());
+} else {
+  config = {};
+}
+
+stls.createBackend(config)
+    .listen(config.port || 8000, config.host || '::', function() {
+      var addr = this.address();
+      console.log('Listening on [%s]:%d', addr.address, addr.port);
+    });
