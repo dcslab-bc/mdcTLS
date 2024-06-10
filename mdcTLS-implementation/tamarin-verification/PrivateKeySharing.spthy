@@ -1,0 +1,97 @@
+theory PrivateKeySharing
+begin
+
+builtins: asymmetric-encryption, hashing, signing
+
+functions: pk/1
+
+// Rule to generate and register a server's key pair
+rule Register_Server:
+  [ Fr(~skS) ]
+  -->
+  [ !ServerLtk($S, ~skS), !ServerPk($S, pk(~skS)) ]
+
+// Rule to generate and register a middlebox's key pair
+rule Register_Middlebox:
+  [ Fr(~skM) ]
+  -->
+  [ !MiddleboxLtk($M, ~skM), !MiddleboxPk($M, pk(~skM)) ]
+
+// Rule to generate and register a client's key pair
+rule Register_Client:
+  [ Fr(~skC) ]
+  -->
+  [ !ClientLtk($C, ~skC), !ClientPk($C, pk(~skC)) ]
+
+// Server shares its private key with the middlebox
+rule Server_Shares_Private_Key:
+  [ !ServerLtk($S, ~skS), !MiddleboxPk($M, pkM) ]
+  --[ ServerSharedPrivateKey($S, $M) ]->
+  [ !SharedServerLtk($M, ~skS) ]
+
+// Client initiates handshake with the middlebox, thinking it is the server
+rule Client_Start_Handshake:
+  let
+    clientHello = aenc(~sessionKey, pkM)
+  in
+  [ Fr(~sessionKey), !ClientPk($C, pkC), !MiddleboxPk($M, pkM) ]
+  --[ ClientSentSessionKey($C, $M, ~sessionKey) ]->
+  [ Out(clientHello), !ClientSessionKey($C, ~sessionKey) ]
+
+// Middlebox receives the client hello and starts handshake with the server
+rule Middlebox_Start_Handshake:
+  let
+    clientHello = aenc(~sessionKey, pkM)
+    serverHello = aenc(~sessionKey, pkS)
+  in
+  [ In(clientHello), !MiddleboxLtk($M, ~skM), !SharedServerLtk($M, ~skS), Fr(~sessionKey), !ServerPk($S, pkS) ]
+  --[ MiddleboxSentSessionKey($M, $S, ~sessionKey) ]->
+  [ Out(serverHello), !MiddleboxClientSessionKey($M, ~sessionKey), !MiddleboxServerSessionKey($M, ~sessionKey) ]
+
+// Server receives the middlebox hello and completes handshake
+rule Server_Receive_Handshake:
+  let
+    sessionKey = adec(serverHello, ~skS)
+  in
+  [ In(serverHello), !ServerLtk($S, ~skS) ]
+  --[ ServerReceivedSessionKey($S, sessionKey) ]->
+  [ !ServerSessionKey($S, sessionKey) ]
+
+// Middlebox completes the handshake with the client
+rule Middlebox_Complete_Handshake:
+  let
+    sessionKey = adec(clientHello, ~skM)
+  in
+  [ In(clientHello), !MiddleboxLtk($M, ~skM), !MiddleboxClientSessionKey($M, ~sessionKey) ]
+  --[ MiddleboxCompletedSessionKey($M, $C, sessionKey) ]->
+  [ !MiddleboxClientSessionKey($M, sessionKey) ]
+
+// Rule to reveal the server's private key
+rule Reveal_Server_Private_Key:
+  [ !ServerLtk($S, skS) ]
+  --[ ServerPrivateKeyRevealed($S, skS) ]->
+  [ Out(skS) ]
+
+// Rule to reveal the middlebox's session key
+rule Reveal_Middlebox_Session_Key:
+  [ !MiddleboxServerSessionKey($M, sessionKey) ]
+  --[ MiddleboxSessionKeyRevealed($M, sessionKey) ]->
+  [ Out(sessionKey) ]
+
+// Security properties
+// Lemma to ensure that the server's private key remains secret unless explicitly revealed
+lemma ServerPrivateKeySecrecy:
+  "not(Ex S skS #i #j.
+    ServerPrivateKeyRevealed(S, skS) @ i
+    & K(skS) @ j
+    & not(Ex #r. ServerPrivateKeyRevealed(S, skS) @ r))"
+
+// Lemma to ensure the confidentiality of the middlebox's session key unless explicitly revealed
+lemma MiddleboxSessionKeySecrecy:
+  "not(Ex M sessionKey #i #j.
+    MiddleboxSessionKeyRevealed(M, sessionKey) @ i
+    & K(sessionKey) @ j
+    & not(Ex #r. MiddleboxSessionKeyRevealed(M, sessionKey) @ r))"
+
+end
+
